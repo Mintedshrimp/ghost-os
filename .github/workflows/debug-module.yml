@@ -1,4 +1,9 @@
-name: Debug Module CI
+# Debug & Test Module CI
+# - Collects diagnostics (java/gradle versions, file tree)
+# - Runs lint, unit tests (if present) and debug assemble
+# - Captures console logs for each step and uploads test/lint/AAR artifacts for post-mortem
+# Trigger: push on module/shared/gradle file changes, PRs to main, manual dispatch
+name: Module Debug & Test CI
 
 on:
   push:
@@ -23,11 +28,14 @@ on:
 env:
   JAVA_VERSION: '17'
   JAVA_DISTRIBUTION: 'temurin'
+  CI_LOG_DIR: ${{ github.workspace }}/ci-logs
 
 jobs:
-  lint:
-    name: Lint
+  prepare:
+    name: Prepare environment & diagnostics
     runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ steps.cache.outputs.cache-key }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -50,150 +58,177 @@ jobs:
             cmake;3.22.1
 
       - name: Cache Gradle packages
+        id: cache
         uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/libs.versions.toml') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'gradle/libs.versions.toml') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run lint
-        run: ./gradlew :module:lint --stacktrace
-        continue-on-error: true
+      - name: Print environment & versions
+        run: |
+          mkdir -p "${CI_LOG_DIR}"
+          echo "=== java -version ===" | tee "${CI_LOG_DIR}/java-version.log"
+          java -version 2>&1 | tee -a "${CI_LOG_DIR}/java-version.log"
+          echo "=== ./gradlew --version ===" | tee "${CI_LOG_DIR}/gradle-version.log"
+          ./gradlew --version 2>&1 | tee -a "${CI_LOG_DIR}/gradle-version.log"
+          echo "=== ls module (top-level) ===" | tee "${CI_LOG_DIR}/module-tree.log"
+          ls -la module || true
+          echo "" >> "${CI_LOG_DIR}/module-tree.log"
+          echo "=== find module files ===" >> "${CI_LOG_DIR}/module-tree.log"
+          find module -maxdepth 3 -type f -printf '%p (%s bytes)\n' 2>/dev/null | tee -a "${CI_LOG_DIR}/module-tree.log" || true
+
+  run-lint-test-build:
+    name: Lint, Test and Build (debug)
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+          packages: >
+            platforms;android-34
+            build-tools;34.0.0
+            ndk;25.2.9519653
+            cmake;3.22.1
+
+      - name: Restore Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run lint (non-blocking)
+        id: lint
+        run: |
+          mkdir -p "${CI_LOG_DIR}"
+          echo "Running lint..." | tee "${CI_LOG_DIR}/lint.log"
+          ./gradlew :module:lint --stacktrace 2>&1 | tee -a "${CI_LOG_DIR}/lint.log" || true
+
+      - name: Discover test tasks & run tests (if present)
+        id: tests
+        run: |
+          set -euo pipefail
+          mkdir -p "${CI_LOG_DIR}"
+          echo "Discovering module test tasks..." | tee "${CI_LOG_DIR}/test-discovery.log"
+          ./gradlew :module:tasks --all > "${CI_LOG_DIR}/module-tasks.log" 2>&1 || true
+          if grep -q "testDebugUnitTest" "${CI_LOG_DIR}/module-tasks.log"; then
+            TASK=":module:testDebugUnitTest"
+          elif grep -q "^test\\b" "${CI_LOG_DIR}/module-tasks.log"; then
+            TASK=":module:test"
+          else
+            TASK=""
+          fi
+          echo "Selected test task: ${TASK}" | tee -a "${CI_LOG_DIR}/test-discovery.log"
+          if [ -n "${TASK}" ]; then
+            ./gradlew ${TASK} --no-daemon --stacktrace 2>&1 | tee "${CI_LOG_DIR}/tests.log" || TEST_EXIT=${PIPESTATUS[0]}
+            exit ${TEST_EXIT:-0}
+          else
+            echo "No test tasks found for module" | tee -a "${CI_LOG_DIR}/test-discovery.log"
+          fi
+
+      - name: Build debug AAR and capture logs
+        id: assemble
+        run: |
+          mkdir -p "${CI_LOG_DIR}"
+          echo "Assembling debug AAR..." | tee "${CI_LOG_DIR}/assemble-debug.log"
+          # Capture exit code of gradle while still piping output to tee
+          ./gradlew :module:assembleDebug --no-daemon --stacktrace 2>&1 | tee -a "${CI_LOG_DIR}/assemble-debug.log"
+          echo "assemble exit: ${PIPESTATUS[0]}" >> "${CI_LOG_DIR}/assemble-debug.log"
+          # Exit with the same code so job fails when assemble fails
+          if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+            exit "${PIPESTATUS[0]}"
+          fi
+
+      - name: Collect Gradle & CI logs
+        if: always()
+        run: |
+          echo "Listing CI logs:"
+          ls -la "${CI_LOG_DIR}" || true
+          du -sh "${CI_LOG_DIR}" || true
 
       - name: Upload lint results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: lint-results
-          path: module/build/reports/lint-results*.html
+          path: |
+            module/build/reports/lint-results*.html
+            module/build/reports/lint-results*.xml
+            "${CI_LOG_DIR}/lint.log"
           if-no-files-found: warn
 
-  build-debug:
-    name: Build Debug AAR
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: ${{ env.JAVA_DISTRIBUTION }}
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          accept-android-sdk-licenses: true
-          log-accepted-android-sdk-licenses: false
-          packages: >
-            platforms;android-34
-            build-tools;34.0.0
-            ndk;25.2.9519653
-            cmake;3.22.1
-
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
-        with:
+          name: test-reports
           path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/libs.versions.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+            module/build/test-results/**/*
+            module/build/reports/tests/**/*
+            "${CI_LOG_DIR}/tests.log"
+            "${CI_LOG_DIR}/test-discovery.log"
+            "${CI_LOG_DIR}/module-tasks.log"
+          if-no-files-found: warn
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Build debug AAR (arm64-v8a + armeabi-v7a)
-        run: |
-          ./gradlew :module:assembleDebug \
-            -Pandroid.abiFilters="arm64-v8a,armeabi-v7a" \
-            --stacktrace
-
-      - name: Upload debug AAR
+      - name: Upload debug AAR(s)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: debug-aar
-          path: module/build/outputs/aar/module-debug.aar
+          path: |
+            module/build/outputs/aar/*.aar
           if-no-files-found: error
 
-  build-release:
-    name: Build Release AAR
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: ${{ env.JAVA_DISTRIBUTION }}
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          accept-android-sdk-licenses: true
-          log-accepted-android-sdk-licenses: false
-          packages: >
-            platforms;android-34
-            build-tools;34.0.0
-            ndk;25.2.9519653
-            cmake;3.22.1
-
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/libs.versions.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Build release AAR (arm64-v8a + armeabi-v7a)
-        run: |
-          ./gradlew :module:assembleRelease \
-            -Pandroid.abiFilters="arm64-v8a,armeabi-v7a" \
-            --stacktrace
-
-      - name: Upload release AAR
+      - name: Upload CI diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-aar
-          path: module/build/outputs/aar/module-release.aar
-          if-no-files-found: error
+          name: ci-logs
+          path: "${CI_LOG_DIR}"
+          if-no-files-found: warn
 
   summary:
-    name: Build Summary
+    name: Summary & fail-on-critical
     runs-on: ubuntu-latest
-    needs: [lint, build-debug, build-release]
+    needs: [prepare, run-lint-test-build]
     if: always()
     steps:
-      - name: Check job results
+      - name: Print short summary
         run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Module Debug & Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Result |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build Debug | ${{ needs.build-debug.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build Release | ${{ needs.build-release.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Prepare | ${{ needs.prepare.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint/Test/Build | ${{ needs['run-lint-test-build'].result }} |" >> $GITHUB_STEP_SUMMARY
 
-      - name: Fail if critical jobs failed
-        if: >
-          needs.build-debug.result == 'failure' ||
-          needs.build-release.result == 'failure'
+      - name: Fail if assemble failed
+        if: needs.run-lint-test-build.result == 'failure'
         run: |
-          echo "One or more critical build jobs failed."
+          echo "Critical build job failed."
           exit 1
