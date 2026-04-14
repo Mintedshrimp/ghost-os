@@ -8,9 +8,13 @@
   <a href="#"><img src="https://img.shields.io/badge/Android-8.0%2B-34A853?style=flat-square&logo=android&logoColor=white" alt="Android 8.0+"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-important?style=flat-square&logo=gnu&logoColor=white" alt="License: GPL-3.0"/></a>
   <a href="https://github.com/LSPosed/LSPosed"><img src="https://img.shields.io/badge/Xposed-LSPosed-9B59B6?style=flat-square&logo=android&logoColor=white" alt="Xposed: LSPosed"/></a>
-  <a href="https://github.com/iamr0s/Dhizuku"><img src="https://img.shields.io/badge/Device%20Owner-Dhizuku-FF6B35?style=flat-square&logo=shield&logoColor=white" alt="Device Owner: Dhizuku"/></a>
+  <a 
+  href="https://github.com/iamr0s/Dhizuku"><img src="https://img.shields.io/badge/Device%20Owner-Dhizuku-FF6B35?style=flat-square&logo=shield&logoColor=white" alt="Device Owner: Dhizuku"/></a>
 </p>
-
+![GitHub stars](https://img.shields.io/github/stars/Mintedshrimp/ghost-os?style=social)
+![GitHub forks](https://img.shields.io/github/forks/Mintedshrimp/ghost-os?style=social)
+![GitHub issues](https://img.shields.io/github/issues/Mintedshrimp/ghost-os)
+![GitHub last commit](https://img.shields.io/github/last-commit/Mintedshrimp/ghost-os)
 ---
 
 ## 📖 What Is GhostOS?
