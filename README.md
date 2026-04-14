@@ -5,18 +5,22 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/Android-8.0%2B-34A853?style=flat-square&logo=android&logoColor=white" alt="Android 8.0+"/></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-important?style=flat-square&logo=gnu&logoColor=white" alt="License: GPL-3.0"/></a>
-  <a href="https://github.com/LSPosed/LSPosed"><img src="https://img.shields.io/badge/Xposed-LSPosed-9B59B6?style=flat-square&logo=android&logoColor=white" alt="Xposed: LSPosed"/></a>
-  <a 
-    <img src="[https://img.shields.io/badge/Xposed-LSPosed-9B59B6?style=flat-square&logo=android&logoColor=white](https://img.shields.io/github/stars/Mintedshrimp/ghost-os?style=social)" alt="Github:Stars "/></a>
-  <a 
-  href="https://github.com/iamr0s/Dhizuku"><img src="https://img.shields.io/badge/Device%20Owner-Dhizuku-FF6B35?style=flat-square&logo=shield&logoColor=white" alt="Device Owner: Dhizuku"/></a>
+  <!-- Platform & License Badges -->
+  <a href="#"><img src="https://img.shields.io/badge/Android-8.0%2B-34A853?style=for-the-badge&logo=android&logoColor=white" alt="Android 8.0+"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge&logo=gnu&logoColor=white" alt="License: GPL-3.0"/></a>
+  <a href="https://github.com/LSPosed/LSPosed"><img src="https://img.shields.io/badge/Xposed-LSPosed-9B59B6?style=for-the-badge&logo=android&logoColor=white" alt="Xposed: LSPosed"/></a>
+  <a href="https://github.com/iamr0s/Dhizuku"><img src="https://img.shields.io/badge/Device_Owner-Dhizuku-FF6B35?style=for-the-badge&logo=shield&logoColor=white" alt="Device Owner: Dhizuku"/></a>
 </p>
-![GitHub stars](https://img.shields.io/github/stars/Mintedshrimp/ghost-os?style=social)
-![GitHub forks](https://img.shields.io/github/forks/Mintedshrimp/ghost-os?style=social)
-![GitHub issues](https://img.shields.io/github/issues/Mintedshrimp/ghost-os)
-![GitHub last commit](https://img.shields.io/github/last-commit/Mintedshrimp/ghost-os)
+
+<p align="center">
+  <!-- GitHub Stats Badges -->
+  <a href="https://github.com/Mintedshrimp/ghost-os/stargazers"><img src="https://img.shields.io/github/stars/Mintedshrimp/ghost-os?style=social" alt="GitHub stars"/></a>
+  <a href="https://github.com/Mintedshrimp/ghost-os/network/members"><img src="https://img.shields.io/github/forks/Mintedshrimp/ghost-os?style=social" alt="GitHub forks"/></a>
+  <a href="https://github.com/Mintedshrimp/ghost-os/issues"><img src="https://img.shields.io/github/issues/Mintedshrimp/ghost-os?style=social" alt="GitHub issues"/></a>
+  <a href="https://github.com/Mintedshrimp/ghost-os"><img src="https://img.shields.io/github/last-commit/Mintedshrimp/ghost-os?style=social" alt="Last commit"/></a>
+</p>
+
+---
 ---
 
 ## 📖 What Is GhostOS?
