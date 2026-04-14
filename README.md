@@ -9,6 +9,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-important?style=flat-square&logo=gnu&logoColor=white" alt="License: GPL-3.0"/></a>
   <a href="https://github.com/LSPosed/LSPosed"><img src="https://img.shields.io/badge/Xposed-LSPosed-9B59B6?style=flat-square&logo=android&logoColor=white" alt="Xposed: LSPosed"/></a>
   <a 
+    <img src="[https://img.shields.io/badge/Xposed-LSPosed-9B59B6?style=flat-square&logo=android&logoColor=white](https://img.shields.io/github/stars/Mintedshrimp/ghost-os?style=social)" alt="Github:Stars "/></a>
+  <a 
   href="https://github.com/iamr0s/Dhizuku"><img src="https://img.shields.io/badge/Device%20Owner-Dhizuku-FF6B35?style=flat-square&logo=shield&logoColor=white" alt="Device Owner: Dhizuku"/></a>
 </p>
 ![GitHub stars](https://img.shields.io/github/stars/Mintedshrimp/ghost-os?style=social)
