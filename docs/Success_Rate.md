@@ -167,3 +167,87 @@ Android versions prior to 5.0 contained a deserialization vulnerability in `Bind
 ---
 
 ## 📈 Success Probability Flowchart
+
+```
+
+User activates GhostOS Device Owner
+│
+▼
+┌───────────────┐
+│ Point Blank   │
+│ Available?    │
+└───────┬───────┘
+│
+┌───────▼───────┐
+│ YES (95%)     │───▶ UID 1000 Achieved ✓
+└───────────────┘
+│
+▼
+┌───────────────┐
+│ Samsung TTS   │
+│ + Samsung?    │
+└───────┬───────┘
+│
+┌───────▼───────┐
+│ YES (95%)     │───▶ UID 1000 Achieved ✓
+└───────────────┘
+│
+▼
+┌───────────────┐
+│ CVE-2024-31317│
+│ + Pre-June'24?│
+└───────┬───────┘
+│
+┌───────▼───────┐
+│ YES (40%)     │───▶ UID 1000 Achieved ✓
+└───────────────┘
+│
+▼
+┌───────────────┐
+│ Shizuku       │
+│ Available?    │
+└───────┬───────┘
+│
+┌───────▼───────┐
+│ YES (80%)     │───▶ UID 2000 (Limited) ⚠
+└───────────────┘
+│
+▼
+┌───────────────┐
+│ No Method     │
+│ Available     │───▶ Fallback Mode ✗
+└───────────────┘
+
+```
+
+---
+
+## 🎯 GhostOS Fallback Strategy
+
+GhostOS automatically attempts methods in this priority order:
+
+1. **Point Blank** (Primary) — Universal, highest success rate
+2. **Samsung TTS** — If Samsung device detected
+3. **CVE-2024-31317** — If security patch < June 2024
+4. **am start-in-vsync** — If Android 14-15 detected
+5. **Shizuku Bridge** — Fallback for partial functionality
+6. **Legacy methods** — Only on detected old Android versions
+
+The status indicator in the GhostOS top bar shows:
+- **✓ Green**: UID 1000 active (any method)
+- **⚠ Yellow**: UID 2000 active (Shizuku fallback)
+- **✗ Red**: No privilege escalation active
+
+---
+
+## ⚠️ Important Notes
+
+- These percentages are **estimates** based on documented compatibility and vulnerability disclosures
+- Actual success depends on device model, Android version, and security patch level
+- GhostOS **does not exploit vulnerabilities**—it uses documented APIs and user-granted Device Owner privileges for the primary method
+- Secondary methods are included for **research and fallback purposes only**
+
+---
+
+*Last updated: April 2026*
+*Based on Android security bulletins through April 2026*
