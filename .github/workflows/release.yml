@@ -1,0 +1,216 @@
+# Build APKs (Debug + Release), generate JKS if needed, and create a Release with assets.
+# compileSdk: 35, targetSdk: 37, minSdk: 26
+name: Build APKs and Create Release
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+env:
+  JAVA_VERSION: '17'
+  JAVA_DISTRIBUTION: 'temurin'
+  KS_FILE: release.jks
+  CI_LOG_DIR: ${{ github.workspace }}/ci-logs
+
+jobs:
+  build:
+    name: Build Debug & Release APKs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Set up Android SDK (minSdk 26, compileSdk 35, targetSdk 37)
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+          packages: >
+            platforms;android-26
+            platforms;android-35
+            platforms;android-37
+            build-tools;37.0.0
+            ndk;25.2.9519653
+            cmake;3.22.1
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Grant execute permission to gradlew
+        run: chmod +x gradlew
+
+      - name: Prepare CI logs dir
+        run: mkdir -p "${CI_LOG_DIR}"
+
+      - name: Obtain or generate keystore
+        id: keystore
+        run: |
+          set -euo pipefail
+          # If you want to provide a persistent keystore, add these repository secrets:
+          # - KEYSTORE_BASE64 (base64 of .jks)
+          # - KEYSTORE_PASSWORD
+          # - KEY_ALIAS
+          # - KEY_PASSWORD
+          if [ -n "${{ secrets.KEYSTORE_BASE64 || '' }}" ]; then
+            echo "Using keystore from KEYSTORE_BASE64 secret"
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "${KS_FILE}"
+            echo "ks_provided=true" >> $GITHUB_OUTPUT
+            echo "ks_file=${KS_FILE}" >> $GITHUB_OUTPUT
+            echo "ks_password=${{ secrets.KEYSTORE_PASSWORD }}" >> $GITHUB_OUTPUT
+            echo "ks_alias=${{ secrets.KEY_ALIAS }}" >> $GITHUB_OUTPUT
+            echo "ks_key_password=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_OUTPUT
+          else
+            echo "No keystore secret found — generating ephemeral keystore (will be uploaded to Release)"
+            KS_PASS=$(openssl rand -base64 12)
+            KEY_PASS=$KS_PASS
+            ALIAS=ci_alias_$(date +%s)
+            keytool -genkeypair -v \
+              -keystore "${KS_FILE}" \
+              -storepass "${KS_PASS}" \
+              -alias "${ALIAS}" \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=CI,O=CI,L=CI,ST=CI,C=US"
+            echo "ks_provided=false" >> $GITHUB_OUTPUT
+            echo "ks_file=${KS_FILE}" >> $GITHUB_OUTPUT
+            echo "ks_password=${KS_PASS}" >> $GITHUB_OUTPUT
+            echo "ks_alias=${ALIAS}" >> $GITHUB_OUTPUT
+            echo "ks_key_password=${KEY_PASS}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build debug & release (signed)
+        id: assemble
+        env:
+          KEYSTORE_PATH: ${{ steps.keystore.outputs.ks_file }}
+          KEYSTORE_PASSWORD: ${{ steps.keystore.outputs.ks_password }}
+          KEY_ALIAS: ${{ steps.keystore.outputs.ks_alias }}
+          KEY_PASSWORD: ${{ steps.keystore.outputs.ks_key_password }}
+        run: |
+          set -euo pipefail
+          echo "=== java -version ===" > "${CI_LOG_DIR}/java-version.log"
+          java -version 2>&1 | tee -a "${CI_LOG_DIR}/java-version.log"
+          echo "=== ./gradlew --version ===" > "${CI_LOG_DIR}/gradle-version.log"
+          ./gradlew --version 2>&1 | tee -a "${CI_LOG_DIR}/gradle-version.log"
+
+          echo "Assembling debug APK..." | tee "${CI_LOG_DIR}/assemble-debug.log"
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace 2>&1 | tee -a "${CI_LOG_DIR}/assemble-debug.log"
+
+          echo "Assembling release APK (signed)..." | tee "${CI_LOG_DIR}/assemble-release.log"
+          ./gradlew :app:assembleRelease \
+            -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD" \
+            --no-daemon --stacktrace 2>&1 | tee -a "${CI_LOG_DIR}/assemble-release.log"
+
+      - name: Upload built APKs & JKS as job artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-apks-and-keystore
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
+            ${{ steps.keystore.outputs.ks_file }}
+            ${CI_LOG_DIR}
+          if-no-files-found: warn
+
+      - name: Find APK files (set outputs)
+        id: find_apks
+        run: |
+          set -euo pipefail
+          RELEASE_APK=""
+          DEBUG_APK=""
+          for f in app/build/outputs/apk/release/*.apk; do
+            if [ -f "$f" ]; then
+              RELEASE_APK="$f"
+              break
+            fi
+          done
+          for f in app/build/outputs/apk/debug/*.apk; do
+            if [ -f "$f" ]; then
+              DEBUG_APK="$f"
+              break
+            fi
+          done
+          echo "release_apk=${RELEASE_APK}" >> $GITHUB_OUTPUT
+          echo "debug_apk=${DEBUG_APK}" >> $GITHUB_OUTPUT
+
+      - name: Create tag for this build
+        if: success()
+        run: |
+          TAG="build-${GITHUB_SHA::8}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "$TAG" $GITHUB_SHA
+          git push --force origin "$TAG"
+
+      - name: Create GitHub Release
+        id: create_release
+        if: success()
+        uses: actions/create-release@v1
+        with:
+          tag_name: build-${{ github.sha }}
+          release_name: Build ${{ github.sha }}
+          body: Automated build for commit ${{ github.sha }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release APK (release)
+        if: success() && steps.find_apks.outputs.release_apk != ''
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.find_apks.outputs.release_apk }}
+          asset_name: release-${{ github.sha }}.apk
+          asset_content_type: application/vnd.android.package-archive
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release APK (debug)
+        if: success() && steps.find_apks.outputs.debug_apk != ''
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.find_apks.outputs.debug_apk }}
+          asset_name: debug-${{ github.sha }}.apk
+          asset_content_type: application/vnd.android.package-archive
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload keystore to Release (if generated)
+        if: success() && steps.keystore.outputs.ks_provided == 'false'
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.keystore.outputs.ks_file }}
+          asset_name: ci-generated-release.jks
+          asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Short summary
+        if: always()
+        run: |
+          echo "Build finished. Release created: build-${GITHUB_SHA}"
+          echo "Release APK: ${{ steps.find_apks.outputs.release_apk }}"
+          echo "Debug APK: ${{ steps.find_apks.outputs.debug_apk }}"
