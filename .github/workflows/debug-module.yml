@@ -121,7 +121,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: debug-aar
-          path: module/build/outputs/aar/*-debug.aar
+          path: module/build/outputs/aar/module-debug.aar
           if-no-files-found: error
 
   build-release:
@@ -171,7 +171,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-aar
-          path: module/build/outputs/aar/*-release.aar
+          path: module/build/outputs/aar/module-release.aar
           if-no-files-found: error
 
   summary:
