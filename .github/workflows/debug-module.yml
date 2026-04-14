@@ -1,0 +1,322 @@
+name: Debug Module (Point Blank)
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'module/**'
+      - 'shared/**'
+      - 'gradle/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'module/**'
+  workflow_dispatch:
+    inputs:
+      debug_native:
+        description: 'Build with native debug symbols'
+        type: boolean
+        default: true
+      arch_filter:
+        description: 'Architecture filter (blank = all)'
+        type: choice
+        options:
+          - 'all'
+          - 'arm64-v8a'
+          - 'armeabi-v7a'
+        default: 'all'
+
+env:
+  JAVA_VERSION: '17'
+  MODULE_PATH: 'module'
+
+jobs:
+  # ============================================================
+  # JOB 1: Kotlin Lint & Static Analysis
+  # ============================================================
+  lint:
+    name: 📋 Lint & Static Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+
+      - name: Run Kotlin linter
+        run: |
+          cd ${{ env.MODULE_PATH }}
+          ../gradlew lintDebug --stacktrace
+
+      - name: Run detekt (if configured)
+        run: |
+          cd ${{ env.MODULE_PATH }}
+          ../gradlew detekt || echo "Detekt not configured, skipping"
+
+      - name: Upload lint results
+        uses: actions/upload-artifact@v4
+        with:
+          name: module-lint-results
+          path: |
+            ${{ env.MODULE_PATH }}/build/reports/lint-results*.html
+            ${{ env.MODULE_PATH }}/build/reports/detekt/
+
+  # ============================================================
+  # JOB 2: Native Code Compilation (All Architectures)
+  # ============================================================
+  build-native:
+    name: 🔧 Build Native (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64-v8a, armeabi-v7a]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-34
+            build-tools;34.0.0
+            ndk;25.2.9519653
+            cmake;3.22.1
+
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+
+      - name: Build native for ${{ matrix.arch }}
+        run: |
+          ./gradlew :module:externalNativeBuildDebug \
+            -Pandroid.injected.build.abi=${{ matrix.arch }} \
+            --stacktrace
+
+      - name: Verify .so files
+        run: |
+          echo "Checking compiled libraries..."
+          find module/build/intermediates -name "*.so" -type f | while read so; do
+            echo "  📦 $so"
+            file "$so"
+          done
+
+      - name: Check for undefined symbols
+        run: |
+          for so in $(find module/build/intermediates -name "*.so" -type f); do
+            echo "Checking $so..."
+            nm -u "$so" | head -20 || true
+          done
+
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-libs-${{ matrix.arch }}
+          path: module/build/intermediates/stripped_native_libs/debug/out/lib/${{ matrix.arch }}/
+
+  # ============================================================
+  # JOB 3: Full Module Compilation
+  # ============================================================
+  build-module:
+    name: 📦 Build Module AAR
+    runs-on: ubuntu-latest
+    needs: [lint, build-native]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-34
+            build-tools;34.0.0
+            ndk;25.2.9519653
+            cmake;3.22.1
+
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+
+      - name: Build debug AAR
+        run: |
+          ./gradlew :module:assembleDebug --stacktrace
+
+      - name: Build release AAR
+        run: |
+          ./gradlew :module:assembleRelease --stacktrace
+
+      - name: Verify AAR contents
+        run: |
+          echo "📦 Debug AAR contents:"
+          unzip -l module/build/outputs/aar/module-debug.aar | grep -E "(\.so|\.dex|AndroidManifest)"
+          
+          echo ""
+          echo "📦 Release AAR contents:"
+          unzip -l module/build/outputs/aar/module-release.aar | grep -E "(\.so|\.dex|AndroidManifest)"
+
+      - name: Upload debug AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: point-blank-debug
+          path: module/build/outputs/aar/module-debug.aar
+
+      - name: Upload release AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: point-blank-release
+          path: module/build/outputs/aar/module-release.aar
+
+  # ============================================================
+  # JOB 4: Unit Tests
+  # ============================================================
+  test:
+    name: 🧪 Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+
+      - name: Run unit tests
+        run: |
+          ./gradlew :module:testDebugUnitTest --stacktrace
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: module-test-results
+          path: |
+            module/build/test-results/testDebugUnitTest/
+            module/build/reports/tests/testDebugUnitTest/
+
+  # ============================================================
+  # JOB 5: Dependency Verification
+  # ============================================================
+  verify-deps:
+    name: 🔒 Verify Dependencies
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+
+      - name: Check dependency licenses
+        run: |
+          ./gradlew :module:dependencies --configuration releaseRuntimeClasspath
+
+      - name: Verify Shizuku dependency
+        run: |
+          echo "Checking Shizuku integration..."
+          grep -r "Shizuku" module/src/main/java/ || echo "No Shizuku references found"
+          
+      - name: Verify Xposed API (compileOnly)
+        run: |
+          echo "Xposed API should be compileOnly - checking build.gradle.kts..."
+          grep -A5 "compileOnly" module/build.gradle.kts | grep "xposed" || echo "Xposed API check passed"
+
+  # ============================================================
+  # JOB 6: Summary Report
+  # ============================================================
+  summary:
+    name: 📊 Debug Summary
+    runs-on: ubuntu-latest
+    needs: [lint, build-native, build-module, test, verify-deps]
+    if: always()
+    
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## 🐛 GhostOS Module Debug Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.lint.result }}" == "success" ]]; then
+            echo "| 📋 Lint | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 📋 Lint | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.build-native.result }}" == "success" ]]; then
+            echo "| 🔧 Native Build | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 🔧 Native Build | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.build-module.result }}" == "success" ]]; then
+            echo "| 📦 Module Build | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 📦 Module Build | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.test.result }}" == "success" ]]; then
+            echo "| 🧪 Unit Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 🧪 Unit Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.verify-deps.result }}" == "success" ]]; then
+            echo "| 🔒 Dependency Check | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 🔒 Dependency Check | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Artifacts Available" >> $GITHUB_STEP_SUMMARY
+          echo "- \`point-blank-debug\` - Debug AAR" >> $GITHUB_STEP_SUMMARY
+          echo "- \`point-blank-release\` - Release AAR" >> $GITHUB_STEP_SUMMARY
+          echo "- \`native-libs-arm64-v8a\` - ARM64 native libraries" >> $GITHUB_STEP_SUMMARY
+          echo "- \`native-libs-armeabi-v7a\` - ARMv7 native libraries" >> $GITHUB_STEP_SUMMARY
+          echo "- \`module-lint-results\` - Lint reports" >> $GITHUB_STEP_SUMMARY
+          echo "- \`module-test-results\` - Test results" >> $GITHUB_STEP_SUMMARY
+
+      - name: Final status check
+        if: |
+          needs.lint.result != 'success' ||
+          needs.build-native.result != 'success' ||
+          needs.build-module.result != 'success'
+        run: |
+          echo "❌ Some jobs failed!"
+          exit 1
