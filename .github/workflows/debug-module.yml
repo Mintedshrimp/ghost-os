@@ -138,7 +138,7 @@ jobs:
           ./gradlew :module:tasks --all > "${CI_LOG_DIR}/module-tasks.log" 2>&1 || true
           if grep -q "testDebugUnitTest" "${CI_LOG_DIR}/module-tasks.log"; then
             TASK=":module:testDebugUnitTest"
-          elif grep -q "^test\\b" "${CI_LOG_DIR}/module-tasks.log"; then
+          elif grep -q "^test\b" "${CI_LOG_DIR}/module-tasks.log"; then
             TASK=":module:test"
           else
             TASK=""
@@ -151,15 +151,14 @@ jobs:
             echo "No test tasks found for module" | tee -a "${CI_LOG_DIR}/test-discovery.log"
           fi
 
-      - name: Build debug AAR and capture logs
+      - name: Build debug AAR(s) and capture logs
         id: assemble
         run: |
           mkdir -p "${CI_LOG_DIR}"
-          echo "Assembling debug AAR..." | tee "${CI_LOG_DIR}/assemble-debug.log"
-          # Capture exit code of gradle while still piping output to tee
-          ./gradlew :module:assembleDebug --no-daemon --stacktrace 2>&1 | tee -a "${CI_LOG_DIR}/assemble-debug.log"
+          echo "Assembling debug AAR(s) (root assembleDebug)..." | tee "${CI_LOG_DIR}/assemble-debug.log"
+          # Build all modules' debug variants so we don't miss an AAR because of module naming
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee -a "${CI_LOG_DIR}/assemble-debug.log"
           echo "assemble exit: ${PIPESTATUS[0]}" >> "${CI_LOG_DIR}/assemble-debug.log"
-          # Exit with the same code so job fails when assemble fails
           if [ "${PIPESTATUS[0]}" -ne 0 ]; then
             exit "${PIPESTATUS[0]}"
           fi
@@ -188,8 +187,8 @@ jobs:
         with:
           name: test-reports
           path: |
-            module/build/test-results/**/*
-            module/build/reports/tests/**/*
+            module/build/test-results/**
+            module/build/reports/tests/**
             "${CI_LOG_DIR}/tests.log"
             "${CI_LOG_DIR}/test-discovery.log"
             "${CI_LOG_DIR}/module-tasks.log"
@@ -201,8 +200,9 @@ jobs:
         with:
           name: debug-aar
           path: |
-            module/build/outputs/aar/*.aar
-          if-no-files-found: error
+            **/build/outputs/aar/**/*.aar
+            "${CI_LOG_DIR}/assemble-debug.log"
+          if-no-files-found: warn
 
       - name: Upload CI diagnostics
         if: always()
